@@ -1,19 +1,36 @@
 "use server";
 
-import { createClient } from "@supabase/supabase-js";
-import type { Project, Message, AgentOutput, FinalPrompt } from "@/types";
+// ===========================================
+// Agent OS — Supabase Database Server Actions
+// ===========================================
 
-// Note: Server actions must aggressively rebuild the client with the Service Role key if modifying 
-// secured tables in a real setting, however since we are in MVP Guest Mode we just use the anon key.
+import { createClient } from "@supabase/supabase-js";
+import { logger } from "@/lib/logger";
+import type {
+  Project,
+  Message,
+  AgentName,
+  FinalPrompt,
+  RequirementAnalysis,
+  ProductStrategy,
+  TechnicalArchitecture,
+} from "@/types";
+
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
+// FIX: agent output type union replaces `any`
+type AgentOutputJson = RequirementAnalysis | ProductStrategy | TechnicalArchitecture;
+
 /**
- * Creates a new project in Supabase
+ * Creates a new project in Supabase.
  */
-export async function createProjectAction(title: string, idea_raw: string): Promise<Project | null> {
+export async function createProjectAction(
+  title: string,
+  idea_raw: string
+): Promise<Project | null> {
   const { data, error } = await supabase
     .from("projects")
     .insert([{ title, idea_raw }])
@@ -21,17 +38,27 @@ export async function createProjectAction(title: string, idea_raw: string): Prom
     .single();
 
   if (error) {
-    console.error("Supabase create project error:", error);
+    logger.error("createProjectAction failed", { message: error.message, code: error.code });
     return null;
   }
+
   return data as Project;
 }
 
 /**
- * Saves a batch of chat messages directly to Supabase
+ * Saves a batch of chat messages to Supabase.
+ *
+ * FIX: The previous version dropped the `id` field on insert, meaning
+ * Supabase generated a new UUID that didn't match the one stored in
+ * React state. This broke project reload (React key mismatches, duplicate
+ * messages). Now the frontend-generated ID is explicitly included.
  */
-export async function saveMessagesAction(projectId: string, messages: Message[]) {
-  const insertData = messages.map((m) => ({
+export async function saveMessagesAction(
+  projectId: string,
+  messages: Message[]
+): Promise<void> {
+  const insertData = messages.map(m => ({
+    id: m.id,              // FIX: preserve the ID from React state
     project_id: projectId,
     role: m.role,
     sender_type: m.sender_type,
@@ -41,27 +68,45 @@ export async function saveMessagesAction(projectId: string, messages: Message[])
   const { error } = await supabase.from("messages").insert(insertData);
 
   if (error) {
-    console.error("Supabase save messages error:", error);
+    logger.error("saveMessagesAction failed", {
+      message: error.message,
+      code: error.code,
+      projectId,
+    });
   }
 }
 
 /**
- * Saves structured agent outputs to Supabase
+ * Saves structured agent output to Supabase.
+ *
+ * FIX: parameter was typed as `any` — now uses the AgentOutputJson union
+ * and AgentName enum so callers get compile-time type checking.
  */
-export async function saveAgentOutputAction(projectId: string, agent_name: string, output_json: any) {
+export async function saveAgentOutputAction(
+  projectId: string,
+  agent_name: AgentName,
+  output_json: AgentOutputJson
+): Promise<void> {
   const { error } = await supabase
     .from("agent_outputs")
     .insert([{ project_id: projectId, agent_name, output_json }]);
 
   if (error) {
-    console.error(`Supabase save agent output (${agent_name}) error:`, error);
+    logger.error(`saveAgentOutputAction failed for ${agent_name}`, {
+      message: error.message,
+      code: error.code,
+      projectId,
+    });
   }
 }
 
 /**
- * Saves the final markdown prompt to Supabase
+ * Saves the final markdown prompt to Supabase.
  */
-export async function saveFinalPromptAction(projectId: string, prompt_markdown: string): Promise<FinalPrompt | null> {
+export async function saveFinalPromptAction(
+  projectId: string,
+  prompt_markdown: string
+): Promise<FinalPrompt | null> {
   const { data, error } = await supabase
     .from("final_prompts")
     .insert([{ project_id: projectId, prompt_markdown, version: 1 }])
@@ -69,14 +114,19 @@ export async function saveFinalPromptAction(projectId: string, prompt_markdown: 
     .single();
 
   if (error) {
-    console.error("Supabase save final prompt error:", error);
+    logger.error("saveFinalPromptAction failed", {
+      message: error.message,
+      code: error.code,
+      projectId,
+    });
     return null;
   }
+
   return data as FinalPrompt;
 }
 
 /**
- * Fetch all projects for the dashboard history
+ * Fetches all projects ordered by most recent.
  */
 export async function getProjectsAction(): Promise<Project[]> {
   const { data, error } = await supabase
@@ -85,16 +135,19 @@ export async function getProjectsAction(): Promise<Project[]> {
     .order("created_at", { ascending: false });
 
   if (error) {
-    console.error("Supabase get projects error:", error);
+    logger.error("getProjectsAction failed", { message: error.message, code: error.code });
     return [];
   }
+
   return data as Project[];
 }
 
 /**
- * Fetch messages for a specific project
+ * Fetches all messages for a project, ordered chronologically.
  */
-export async function getProjectMessagesAction(projectId: string): Promise<Message[]> {
+export async function getProjectMessagesAction(
+  projectId: string
+): Promise<Message[]> {
   const { data, error } = await supabase
     .from("messages")
     .select("*")
@@ -102,8 +155,13 @@ export async function getProjectMessagesAction(projectId: string): Promise<Messa
     .order("created_at", { ascending: true });
 
   if (error) {
-    console.error("Supabase get messages error:", error);
+    logger.error("getProjectMessagesAction failed", {
+      message: error.message,
+      code: error.code,
+      projectId,
+    });
     return [];
   }
+
   return data as Message[];
 }
