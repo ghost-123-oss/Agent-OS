@@ -119,3 +119,6 @@ export interface ProjectBrief {
   constraints: string[];
   future: string[];
 }
+
+// Re-export workspace UI types
+export type { WorkspacePhase, AgentStatus } from "./workspace";
