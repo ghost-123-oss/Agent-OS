@@ -1,103 +1,37 @@
-// ===========================================
+// =============================================================================
 // Agent OS — Agent Orchestration Pipeline
-// ===========================================
-
+// =============================================================================
+// PHASE 2: All agents now use getProviderForAgent() via specialist-agents.ts.
+// PHASE 3: Supports partial re-run (restartFrom) driven by feedback integrator.
+//          PipelineResult now includes confidenceScores, warnings, pipelineRunId.
+import type { AgentOutputJson } from "@/actions/db";
 import { getLLMProvider } from "@/lib/llm/provider";
-import { LLMMessage } from "@/lib/llm/index";
+import type { LLMMessage } from "@/lib/llm/index";
 import { AGENT_PROMPTS } from "./prompts";
-import { logger, generateTraceId } from "@/lib/logger";
+import { generateTraceId, logger } from "@/lib/logger";
+import { buildAgentContext } from "@/lib/memory/agent-context";
+import {
+  runRequirementAnalyst,
+  runProductStrategist,
+  runTechnicalArchitect,
+  runPromptEngineer,
+} from "./specialist-agents";
+import { runFeedbackIntegrator } from "./feedback-integrator";
+import {
+  saveAgentOutputAction,
+  saveAgentMessageAction,
+} from "@/actions/db";
 import type {
+  AgentContext,
+  AgentName,
+  ChatMessage,
   RequirementAnalysis,
   ProductStrategy,
   TechnicalArchitecture,
   FinalPromptData,
-  ChatMessage,
 } from "@/types";
 
-// ---- Safe agent runner with fallback ----------------------------------------
-// FIX: Previously a single agent failure threw all the way up, killing the
-// entire pipeline and returning a 500 with no partial data. Now each agent
-// is wrapped — if it fails, a typed fallback is returned and the pipeline
-// continues. The error is logged with the shared traceId for correlation.
-
-async function safeRunAgent<T>(
-  fn: () => Promise<T>,
-  fallback: T,
-  agentName: string,
-  traceId: string
-): Promise<T> {
-  const start = Date.now();
-  try {
-    logger.info(`Agent starting: ${agentName}`, undefined, traceId);
-    const result = await fn();
-    const duration = Date.now() - start;
-    logger.info(`Agent completed: ${agentName}`, { durationMs: duration }, traceId);
-    return result;
-  } catch (err) {
-    const duration = Date.now() - start;
-    logger.error(
-      `Agent failed: ${agentName} — using fallback`,
-      { error: err instanceof Error ? err.message : String(err), durationMs: duration },
-      traceId
-    );
-    return fallback;
-  }
-}
-
-// ---- Fallback values --------------------------------------------------------
-// Returned when an agent fails so the pipeline can still produce a usable output.
-
-const FALLBACK_REQUIREMENTS: RequirementAnalysis = {
-  problem_statement: "Could not extract problem statement.",
-  goals: [],
-  constraints: [],
-  missing_details: ["Agent failed — please regenerate."],
-};
-
-const FALLBACK_STRATEGY: ProductStrategy = {
-  target_users: [],
-  mvp_scope: [],
-  feature_priorities: [],
-  user_flow: [],
-};
-
-const FALLBACK_ARCHITECTURE: TechnicalArchitecture = {
-  suggested_stack: {},
-  system_modules: [],
-  integrations: [],
-  data_model_overview: [],
-};
-
-const FALLBACK_FINAL_PROMPT: FinalPromptData = {
-  product_name: "Untitled Project",
-  concept: "",
-  problem_statement: "",
-  target_users: [],
-  mvp_goal: "",
-  features: [],
-  core_flows: [],
-  suggested_stack: {},
-  pages_and_components: [],
-  data_model: [],
-  constraints: [],
-  future_enhancements: [],
-  build_instruction: "Insufficient data — please try regenerating.",
-};
-
-// ---- Context builder --------------------------------------------------------
-// FIX: Cap at last 30 messages to prevent unbounded context growth across
-// the 4 sequential LLM calls. Early messages matter less to Architect/Strategist.
-
-const MAX_CONTEXT_MESSAGES = 30;
-
-function buildConversationContext(messages: ChatMessage[]): string {
-  const capped = messages.slice(-MAX_CONTEXT_MESSAGES);
-  return capped
-    .map(m => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
-    .join("\n\n");
-}
-
-// ---- Orchestrator: live chat ------------------------------------------------
+// ── Orchestrator chat (unchanged) ────────────────────────────────────────────
 
 export async function getOrchestratorResponse(
   conversationHistory: ChatMessage[],
@@ -106,100 +40,25 @@ export async function getOrchestratorResponse(
   const tid = traceId ?? generateTraceId();
   const provider = getLLMProvider();
 
-  logger.info("Orchestrator chat request", { messageCount: conversationHistory.length }, tid);
+  logger.info(
+    "Orchestrator chat",
+    { count: conversationHistory.length },
+    tid
+  );
 
   const messages: LLMMessage[] = [
     { role: "system", content: AGENT_PROMPTS.orchestrator },
-    ...conversationHistory.map(msg => ({
-      role: msg.role as "user" | "assistant",
-      content: msg.content,
+    ...conversationHistory.map((m) => ({
+      role: m.role as "user" | "assistant",
+      content: m.content,
     })),
   ];
 
   const response = await provider.chat(messages);
-  logger.info("Orchestrator chat response received", { provider: response.provider }, tid);
   return response.content;
 }
 
-// ---- Specialist agents ------------------------------------------------------
-
-export async function runRequirementAnalyst(
-  messages: ChatMessage[],
-  traceId: string
-): Promise<RequirementAnalysis> {
-  const provider = getLLMProvider();
-  const context = buildConversationContext(messages);
-
-  const llmMessages: LLMMessage[] = [
-    { role: "system", content: AGENT_PROMPTS.requirement_analyst },
-    {
-      role: "user",
-      content: `Analyze the following conversation and extract structured requirements:\n\n${context}`,
-    },
-  ];
-
-  return provider.chatJSON<RequirementAnalysis>(llmMessages);
-}
-
-export async function runProductStrategist(
-  messages: ChatMessage[],
-  requirements: RequirementAnalysis,
-  traceId: string
-): Promise<ProductStrategy> {
-  const provider = getLLMProvider();
-  const context = buildConversationContext(messages);
-
-  const llmMessages: LLMMessage[] = [
-    { role: "system", content: AGENT_PROMPTS.product_strategist },
-    {
-      role: "user",
-      content: `Based on this conversation:\n\n${context}\n\nAnd these extracted requirements:\n${JSON.stringify(requirements, null, 2)}\n\nDefine the product strategy.`,
-    },
-  ];
-
-  return provider.chatJSON<ProductStrategy>(llmMessages);
-}
-
-export async function runTechnicalArchitect(
-  messages: ChatMessage[],
-  requirements: RequirementAnalysis,
-  strategy: ProductStrategy,
-  traceId: string
-): Promise<TechnicalArchitecture> {
-  const provider = getLLMProvider();
-  const context = buildConversationContext(messages);
-
-  const llmMessages: LLMMessage[] = [
-    { role: "system", content: AGENT_PROMPTS.technical_architect },
-    {
-      role: "user",
-      content: `Based on this conversation:\n\n${context}\n\nRequirements:\n${JSON.stringify(requirements, null, 2)}\n\nProduct Strategy:\n${JSON.stringify(strategy, null, 2)}\n\nDefine the technical architecture.`,
-    },
-  ];
-
-  return provider.chatJSON<TechnicalArchitecture>(llmMessages);
-}
-
-export async function runPromptEngineer(
-  requirements: RequirementAnalysis,
-  strategy: ProductStrategy,
-  architecture: TechnicalArchitecture,
-  traceId: string
-): Promise<FinalPromptData> {
-  const provider = getLLMProvider();
-
-  const llmMessages: LLMMessage[] = [
-    { role: "system", content: AGENT_PROMPTS.prompt_engineer },
-    {
-      role: "user",
-      content: `Synthesize these agent outputs into a final build prompt:\n\nRequirements:\n${JSON.stringify(requirements, null, 2)}\n\nProduct Strategy:\n${JSON.stringify(strategy, null, 2)}\n\nTechnical Architecture:\n${JSON.stringify(architecture, null, 2)}`,
-    },
-  ];
-
-  return provider.chatJSON<FinalPromptData>(llmMessages);
-}
-
-// ---- Full Pipeline ----------------------------------------------------------
+// ── Pipeline result type ─────────────────────────────────────────────────────
 
 export interface PipelineResult {
   requirements: RequirementAnalysis;
@@ -207,54 +66,184 @@ export interface PipelineResult {
   architecture: TechnicalArchitecture;
   finalPrompt: FinalPromptData;
   traceId: string;
+  pipelineRunId: string;
+  // PHASE 3: confidence scores per agent (0-100)
+  confidenceScores: Partial<Record<AgentName, number>>;
+  warnings: string[];
+  // PHASE 3: was the result from a partial re-run?
+  isPartialRerun: boolean;
+  restartedFrom?: AgentName;
+}
+
+// ── Persist agent outputs (fire and forget) ──────────────────────────────────
+
+async function persistAgentOutput(
+  projectId: string | undefined,
+  context: AgentContext,
+  agentName: AgentName,
+  output: unknown,
+  sequenceNumber: number
+): Promise<void> {
+  if (!projectId) return;
+
+  try {
+    // Save to agent_outputs table
+    await saveAgentOutputAction(
+      projectId,
+      agentName,
+      output as AgentOutputJson
+    );
+
+    // Save to agent_messages audit log
+    await saveAgentMessageAction({
+      project_id: projectId,
+      pipeline_run_id: context.pipelineRunId,
+      from_agent: agentName,
+      to_agent: agentName === "requirement_analyst"
+        ? "product_strategist"
+        : agentName === "product_strategist"
+          ? "technical_architect"
+          : agentName === "technical_architect"
+            ? "prompt_engineer"
+            : "prompt_engineer",
+      message_type: "output",
+      payload: output as Record<string, unknown>,
+      sequence_number: sequenceNumber,
+    });
+  } catch (err) {
+    logger.error(
+      `Failed to persist ${agentName} output`,
+      { error: err instanceof Error ? err.message : String(err) },
+      context.traceId
+    );
+    // Non-fatal — pipeline continues
+  }
+}
+
+// ── Full pipeline ─────────────────────────────────────────────────────────────
+
+export interface RunPipelineOptions {
+  // PHASE 3: Optional feedback-driven partial re-run
+  restartFrom?: AgentName;
+  injectedContext?: string;
+  existingContext?: Partial<Pick<AgentContext,
+    "requirementOutput" | "strategyOutput" | "architectureOutput"
+  >>;
 }
 
 export async function runFullPipeline(
   messages: ChatMessage[],
-  traceId?: string
+  traceId?: string,
+  projectId?: string,
+  rawIdea?: string,
+  options: RunPipelineOptions = {}
 ): Promise<PipelineResult> {
   const tid = traceId ?? generateTraceId();
   const pipelineStart = Date.now();
 
-  logger.info("Pipeline started", { messageCount: messages.length }, tid);
-
-  // FIX: Each agent is wrapped in safeRunAgent so one failure doesn't
-  // cascade and kill the entire pipeline. Errors are logged with traceId.
-
-  // Step 1: Requirement Analyst
-  const requirements = await safeRunAgent(
-    () => runRequirementAnalyst(messages, tid),
-    FALLBACK_REQUIREMENTS,
-    "RequirementAnalyst",
+  logger.info(
+    "Pipeline started",
+    {
+      messageCount: messages.length,
+      projectId,
+      restartFrom: options.restartFrom ?? "beginning",
+    },
     tid
   );
 
-  // Step 2: Product Strategist (receives analyst output)
-  const strategy = await safeRunAgent(
-    () => runProductStrategist(messages, requirements, tid),
-    FALLBACK_STRATEGY,
-    "ProductStrategist",
+  // Build context envelope (once — shared across all agents)
+  const context: AgentContext = buildAgentContext(
+    projectId ?? "",
+    rawIdea ?? messages.find((m) => m.role === "user")?.content ?? "",
+    messages,
     tid
   );
 
-  // Step 3: Technical Architect (receives analyst + strategist output)
-  const architecture = await safeRunAgent(
-    () => runTechnicalArchitect(messages, requirements, strategy, tid),
-    FALLBACK_ARCHITECTURE,
-    "TechnicalArchitect",
-    tid
-  );
+  // PHASE 3: For partial re-runs, restore previous agent outputs into context
+  if (options.existingContext) {
+    if (options.existingContext.requirementOutput) {
+      context.requirementOutput = options.existingContext.requirementOutput;
+    }
+    if (options.existingContext.strategyOutput) {
+      context.strategyOutput = options.existingContext.strategyOutput;
+    }
+    if (options.existingContext.architectureOutput) {
+      context.architectureOutput = options.existingContext.architectureOutput;
+    }
+  }
 
-  // Step 4: Prompt Engineer (synthesises all three)
-  const finalPrompt = await safeRunAgent(
-    () => runPromptEngineer(requirements, strategy, architecture, tid),
-    FALLBACK_FINAL_PROMPT,
-    "PromptEngineer",
-    tid
+  // PHASE 3: Inject feedback context into conversation text if provided
+  if (options.injectedContext) {
+    context.conversationText = `${context.conversationText}\n\n[Feedback context]: ${options.injectedContext}`;
+  }
+
+  const restartFrom = options.restartFrom ?? "requirement_analyst";
+  const agentOrder: AgentName[] = [
+    "requirement_analyst",
+    "product_strategist",
+    "technical_architect",
+    "prompt_engineer",
+  ];
+  const startIndex = agentOrder.indexOf(restartFrom);
+  const effectiveStart = startIndex === -1 ? 0 : startIndex;
+
+  let sequenceNumber = effectiveStart;
+
+  // ── Stage 1: Requirement Analyst ─────────────────────────────────────────
+  if (effectiveStart <= 0) {
+    await runRequirementAnalyst(context);
+    await persistAgentOutput(
+      projectId, context, "requirement_analyst",
+      context.requirementOutput, sequenceNumber++
+    );
+  }
+
+  // ── Stage 2: Product Strategist ───────────────────────────────────────────
+  if (effectiveStart <= 1) {
+    await runProductStrategist(context);
+    await persistAgentOutput(
+      projectId, context, "product_strategist",
+      context.strategyOutput, sequenceNumber++
+    );
+  }
+
+  // ── Stage 3: Technical Architect ──────────────────────────────────────────
+  if (effectiveStart <= 2) {
+    await runTechnicalArchitect(context);
+    await persistAgentOutput(
+      projectId, context, "technical_architect",
+      context.architectureOutput, sequenceNumber++
+    );
+  }
+
+  // ── Stage 4: Prompt Engineer ──────────────────────────────────────────────
+  await runPromptEngineer(context);
+  await persistAgentOutput(
+    projectId, context, "prompt_engineer",
+    context.finalPromptOutput, sequenceNumber++
   );
 
   const totalDuration = Date.now() - pipelineStart;
-  logger.info("Pipeline completed", { totalDurationMs: totalDuration }, tid);
+  logger.info(
+    "Pipeline completed",
+    {
+      totalMs: totalDuration,
+      warnings: context.warnings.length,
+      confidenceScores: context.confidenceScores,
+    },
+    tid
+  );
 
-  return { requirements, strategy, architecture, finalPrompt, traceId: tid };
+  return {
+    requirements: context.requirementOutput!,
+    strategy: context.strategyOutput!,
+    architecture: context.architectureOutput!,
+    finalPrompt: context.finalPromptOutput!,
+    traceId: tid,
+    pipelineRunId: context.pipelineRunId,
+    confidenceScores: context.confidenceScores,
+    warnings: context.warnings,
+    isPartialRerun: effectiveStart > 0,
+    restartedFrom: effectiveStart > 0 ? restartFrom : undefined,
+  };
 }
