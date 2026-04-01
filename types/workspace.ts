@@ -1,16 +1,24 @@
-// ===========================================
+// =============================================================================
 // Agent OS — Workspace UI Types
-// ===========================================
-// Extracted from app/page.tsx to keep types/index.ts clean.
+// =============================================================================
+// PHASE 3: AgentStatus.confidence added for sidebar confidence badges.
+//          SUBMIT_FEEDBACK action added for partial pipeline re-run UI.
 
-import type { Project, ChatMessage } from "@/types";
+import type { ChatMessage, AgentName } from "@/types";
 import type { PipelineResult } from "@/agents/orchestrator";
 
-export type WorkspacePhase = "idea" | "chatting" | "processing" | "done" | "error";
+export type WorkspacePhase =
+  | "idea"
+  | "chatting"
+  | "processing"
+  | "done"
+  | "error";
 
 export interface AgentStatus {
   name: string;
   status: "pending" | "running" | "done";
+  // PHASE 3: populated after pipeline completes (0-100)
+  confidence?: number;
 }
 
 export const DEFAULT_AGENT_STATUSES: AgentStatus[] = [
@@ -37,20 +45,53 @@ export interface WorkspaceState {
     pipeline: boolean;
     history: boolean;
   };
+  // PHASE 3: feedback input value (controlled in Sidebar)
+  feedbackValue: string;
 }
 
 export type WorkspaceAction =
-  | { type: "INIT_PROJECT"; payload: { projectId: string; rawIdea: string; hasMessages: boolean; messages: ChatMessage[] } }
+  | {
+    type: "LOAD_PROJECT";
+    payload: {
+      projectId: string;
+      rawIdea: string;
+      hasMessages: boolean;
+      messages: ChatMessage[];
+      pipelineResult: PipelineResult | null;
+      finalMarkdown: string;
+      isCompleted: boolean;
+    };
+  }
+  | {
+    type: "INIT_PROJECT";
+    payload: {
+      projectId: string;
+      rawIdea: string;
+      hasMessages: boolean;
+      messages: ChatMessage[];
+    };
+  }
   | { type: "RESET_PROJECT" }
   | { type: "SET_PHASE"; payload: WorkspacePhase }
   | { type: "SET_RAW_IDEA"; payload: string }
   | { type: "SET_INPUT_VALUE"; payload: string }
   | { type: "SET_MESSAGES"; payload: ChatMessage[] }
   | { type: "ADD_MESSAGE"; payload: ChatMessage }
-  | { type: "SET_LOADING"; payload: { chat?: boolean; pipeline?: boolean; history?: boolean } }
+  | {
+    type: "SET_LOADING";
+    payload: { chat?: boolean; pipeline?: boolean; history?: boolean };
+  }
   | { type: "SET_ERROR"; payload: string | null }
-  | { type: "SET_PIPELINE_RESULT"; payload: { result: PipelineResult; markdown: string } }
-  | { type: "UPDATE_AGENT_STATUS"; payload: { index: number; status: AgentStatus["status"] } }
+  | {
+    type: "SET_PIPELINE_RESULT";
+    payload: { result: PipelineResult; markdown: string };
+  }
+  | {
+    type: "UPDATE_AGENT_STATUS";
+    payload: { index: number; status: AgentStatus["status"] };
+  }
   | { type: "RESET_PIPELINE" }
   | { type: "SET_COPIED"; payload: boolean }
-  | { type: "SET_ACTIVE_TAB"; payload: "brief" | "prompt" };
+  | { type: "SET_ACTIVE_TAB"; payload: "brief" | "prompt" }
+  // PHASE 3: feedback input
+  | { type: "SET_FEEDBACK_VALUE"; payload: string };

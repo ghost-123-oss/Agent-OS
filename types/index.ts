@@ -1,8 +1,9 @@
-// ===========================================
+'TYPESCRIPT'
+// =============================================================================
 // Agent OS — Core TypeScript Types
-// ===========================================
+// =============================================================================
 
-// --- Database Entities ---
+// ── Database entities ────────────────────────────────────────────────────────
 
 export interface User {
   id: string;
@@ -11,7 +12,12 @@ export interface User {
   created_at: string;
 }
 
-export type ProjectStatus = "draft" | "gathering" | "processing" | "completed";
+export type ProjectStatus =
+  | "draft"
+  | "gathering"
+  | "processing"
+  | "completed"
+  | "error";
 
 export interface Project {
   id: string;
@@ -40,13 +46,19 @@ export type AgentName =
   | "requirement_analyst"
   | "product_strategist"
   | "technical_architect"
-  | "prompt_engineer";
+  | "prompt_engineer"
+  | "feedback_integrator";
 
 export interface AgentOutput {
   id: string;
   project_id: string;
   agent_name: AgentName;
   output_json: Record<string, unknown>;
+  model_used?: string;
+  duration_ms?: number;
+  used_fallback?: boolean;
+  trace_id?: string;
+  version?: number;
   created_at: string;
 }
 
@@ -58,7 +70,7 @@ export interface FinalPrompt {
   created_at: string;
 }
 
-// --- Agent Structured Outputs ---
+// ── Agent structured outputs ─────────────────────────────────────────────────
 
 export interface RequirementAnalysis {
   problem_statement: string;
@@ -70,7 +82,10 @@ export interface RequirementAnalysis {
 export interface ProductStrategy {
   target_users: string[];
   mvp_scope: string[];
-  feature_priorities: { feature: string; priority: "must" | "should" | "nice" }[];
+  feature_priorities: {
+    feature: string;
+    priority: "must" | "should" | "nice";
+  }[];
   user_flow: string[];
 }
 
@@ -97,7 +112,60 @@ export interface FinalPromptData {
   build_instruction: string;
 }
 
-// --- UI State ---
+// ── Phase 1: AgentContext — the typed pipeline envelope ──────────────────────
+// Created once per pipeline run and passed sequentially through all agents.
+// No agent stores its own state — everything flows through this object.
+
+export interface AgentContext {
+  // Identity
+  projectId: string;
+  pipelineRunId: string;   // UUID for this specific pipeline execution
+  traceId: string;         // Correlates all log lines for this run
+
+  // Source material (built once, shared across all agents)
+  conversationText: string;  // Last 30 messages pre-formatted
+  rawIdea: string;
+
+  // Agent outputs — filled in progressively as pipeline runs
+  requirementOutput?: RequirementAnalysis;
+  strategyOutput?: ProductStrategy;
+  architectureOutput?: TechnicalArchitecture;
+  finalPromptOutput?: FinalPromptData;
+
+  // Quality tracking — agents append to these as they run
+  warnings: string[];
+  confidenceScores: Partial<Record<AgentName, number>>;  // 0-100 per agent
+  usedFallback: Partial<Record<AgentName, boolean>>;
+  durationMs: Partial<Record<AgentName, number>>;
+}
+
+// ── Phase 1: AgentMessage — inter-agent communication envelope ───────────────
+// Every message passed between agents is saved to the agent_messages table.
+// This gives a full audit trail and enables the Phase 3 Feedback Integrator.
+
+export type AgentMessageType =
+  | "input"
+  | "output"
+  | "feedback"
+  | "correction"
+  | "approval";
+
+export interface AgentMessage {
+  from: AgentName | "user";
+  to: AgentName;
+  type: AgentMessageType;
+  payload: Record<string, unknown>;
+  meta: {
+    pipelineRunId: string;
+    sequenceNumber: number;
+    modelUsed: string;
+    durationMs: number;
+    confidence: number;    // 0-100
+    usedFallback: boolean;
+  };
+}
+
+// ── UI state ─────────────────────────────────────────────────────────────────
 
 export interface ChatMessage {
   id: string;
