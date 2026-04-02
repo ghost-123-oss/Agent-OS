@@ -126,6 +126,8 @@ export interface AgentContext {
   conversationText: string;  // Last 30 messages pre-formatted
   rawIdea: string;
 
+  projectType: string;
+
   // Agent outputs — filled in progressively as pipeline runs
   requirementOutput?: RequirementAnalysis;
   strategyOutput?: ProductStrategy;

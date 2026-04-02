@@ -1,14 +1,12 @@
+'TYPESCRIPT'
 // =============================================================================
-// Agent OS — Agent Orchestration Pipeline
+// Agent OS — Orchestrator + Full Pipeline
 // =============================================================================
-// PHASE 2: All agents now use getProviderForAgent() via specialist-agents.ts.
-// PHASE 3: Supports partial re-run (restartFrom) driven by feedback integrator.
-//          PipelineResult now includes confidenceScores, warnings, pipelineRunId.
-import type { AgentOutputJson } from "@/actions/db";
+
 import { getLLMProvider } from "@/lib/llm/provider";
 import type { LLMMessage } from "@/lib/llm/index";
 import { AGENT_PROMPTS } from "./prompts";
-import { generateTraceId, logger } from "@/lib/logger";
+import { logger, generateTraceId } from "@/lib/logger";
 import { buildAgentContext } from "@/lib/memory/agent-context";
 import {
   runRequirementAnalyst,
@@ -17,10 +15,7 @@ import {
   runPromptEngineer,
 } from "./specialist-agents";
 import { runFeedbackIntegrator } from "./feedback-integrator";
-import {
-  saveAgentOutputAction,
-  saveAgentMessageAction,
-} from "@/actions/db";
+import { saveAgentMessageAction } from "@/actions/db";
 import type {
   AgentContext,
   AgentName,
@@ -31,34 +26,7 @@ import type {
   FinalPromptData,
 } from "@/types";
 
-// ── Orchestrator chat (unchanged) ────────────────────────────────────────────
-
-export async function getOrchestratorResponse(
-  conversationHistory: ChatMessage[],
-  traceId?: string
-): Promise<string> {
-  const tid = traceId ?? generateTraceId();
-  const provider = getLLMProvider();
-
-  logger.info(
-    "Orchestrator chat",
-    { count: conversationHistory.length },
-    tid
-  );
-
-  const messages: LLMMessage[] = [
-    { role: "system", content: AGENT_PROMPTS.orchestrator },
-    ...conversationHistory.map((m) => ({
-      role: m.role as "user" | "assistant",
-      content: m.content,
-    })),
-  ];
-
-  const response = await provider.chat(messages);
-  return response.content;
-}
-
-// ── Pipeline result type ─────────────────────────────────────────────────────
+// ── Pipeline result type ──────────────────────────────────────────────────────
 
 export interface PipelineResult {
   requirements: RequirementAnalysis;
@@ -67,183 +35,215 @@ export interface PipelineResult {
   finalPrompt: FinalPromptData;
   traceId: string;
   pipelineRunId: string;
-  // PHASE 3: confidence scores per agent (0-100)
-  confidenceScores: Partial<Record<AgentName, number>>;
+  confidenceScores: Record<string, number>;
   warnings: string[];
-  // PHASE 3: was the result from a partial re-run?
-  isPartialRerun: boolean;
-  restartedFrom?: AgentName;
+  usedFallback: Record<string, boolean>;
+  isPartialRerun?: boolean;
 }
 
-// ── Persist agent outputs (fire and forget) ──────────────────────────────────
-
-async function persistAgentOutput(
-  projectId: string | undefined,
-  context: AgentContext,
-  agentName: AgentName,
-  output: unknown,
-  sequenceNumber: number
-): Promise<void> {
-  if (!projectId) return;
-
-  try {
-    // Save to agent_outputs table
-    await saveAgentOutputAction(
-      projectId,
-      agentName,
-      output as AgentOutputJson
-    );
-
-    // Save to agent_messages audit log
-    await saveAgentMessageAction({
-      project_id: projectId,
-      pipeline_run_id: context.pipelineRunId,
-      from_agent: agentName,
-      to_agent: agentName === "requirement_analyst"
-        ? "product_strategist"
-        : agentName === "product_strategist"
-          ? "technical_architect"
-          : agentName === "technical_architect"
-            ? "prompt_engineer"
-            : "prompt_engineer",
-      message_type: "output",
-      payload: output as Record<string, unknown>,
-      sequence_number: sequenceNumber,
-    });
-  } catch (err) {
-    logger.error(
-      `Failed to persist ${agentName} output`,
-      { error: err instanceof Error ? err.message : String(err) },
-      context.traceId
-    );
-    // Non-fatal — pipeline continues
-  }
-}
-
-// ── Full pipeline ─────────────────────────────────────────────────────────────
+// ── Pipeline run options ──────────────────────────────────────────────────────
 
 export interface RunPipelineOptions {
-  // PHASE 3: Optional feedback-driven partial re-run
+  /** Agent to restart from (for partial re-runs triggered by user feedback). */
   restartFrom?: AgentName;
+  /** Extra context injected by the Feedback Integrator into the restarted agent. */
   injectedContext?: string;
-  existingContext?: Partial<Pick<AgentContext,
-    "requirementOutput" | "strategyOutput" | "architectureOutput"
-  >>;
+  /** Previous pipeline result — provides outputs for agents that are NOT being re-run. */
+  previousResult?: PipelineResult;
 }
+
+// ── Orchestrator: live chat ───────────────────────────────────────────────────
+
+export async function getOrchestratorResponse(
+  conversationHistory: ChatMessage[],
+  traceId?: string
+): Promise<string> {
+  const tid = traceId ?? generateTraceId();
+  const provider = getLLMProvider();
+
+  logger.info("Orchestrator chat", { count: conversationHistory.length }, tid);
+
+  const messages: LLMMessage[] = [
+    { role: "system", content: AGENT_PROMPTS.orchestrator },
+    ...conversationHistory.map((msg) => ({
+      role: msg.role as "user" | "assistant",
+      content: msg.content,
+    })),
+  ];
+
+  const response = await provider.chat(messages);
+
+  // Phase 3: structured trigger detection
+  // The orchestrator prompt ends with the EXACT phrase that triggers the pipeline.
+  // This is more reliable than substring matching.
+  logger.info("Orchestrator response received", { provider: response.provider }, tid);
+  return response.content;
+}
+
+// ── Trigger detection (Phase 3 improvement) ───────────────────────────────────
+// Uses exact phrase matching on the phrase baked into the orchestrator prompt.
+// Falls back to the old includes() check as a safety net.
+
+export function isPipelineReady(content: string): boolean {
+  const exactPhrase = "I have enough information now. Let me generate your structured brief and build prompt!";
+  if (content.includes(exactPhrase)) return true;
+
+  // Safety net fallback
+  const lower = content.toLowerCase();
+  return lower.includes("enough information") || lower.includes("generate your");
+}
+
+// ── Fire-and-forget message persistence ──────────────────────────────────────
+
+function persistAgentMessage(
+  context: AgentContext,
+  agentName: string,
+  payload: Record<string, unknown>,
+  sequenceNumber: number,
+  meta: { durationMs: number; usedFallback: boolean; confidence?: number; modelUsed?: string }
+): void {
+  saveAgentMessageAction({
+    project_id: context.projectId,
+    pipeline_run_id: context.pipelineRunId,
+    from_agent: agentName as never,
+    to_agent: "prompt_engineer" as never,
+    message_type: "output",
+    payload,
+    sequence_number: sequenceNumber,
+    meta: {
+      model_used: meta.modelUsed ?? "mistral",
+      duration_ms: meta.durationMs,
+      confidence: meta.confidence ?? 75,
+      used_fallback: meta.usedFallback,
+    },
+  }).catch((err: any) =>
+    logger.error("persistAgentMessage failed (fire-and-forget)", { error: err })
+  );
+}
+
+// ── Full Pipeline ─────────────────────────────────────────────────────────────
 
 export async function runFullPipeline(
   messages: ChatMessage[],
+  projectId: string = "unknown",
   traceId?: string,
-  projectId?: string,
-  rawIdea?: string,
   options: RunPipelineOptions = {}
 ): Promise<PipelineResult> {
-  const tid = traceId ?? generateTraceId();
   const pipelineStart = Date.now();
+  const context = buildAgentContext(projectId, messages);
+  if (traceId) context.traceId = traceId;
+
+  const { restartFrom, injectedContext, previousResult } = options;
 
   logger.info(
     "Pipeline started",
-    {
-      messageCount: messages.length,
-      projectId,
-      restartFrom: options.restartFrom ?? "beginning",
-    },
-    tid
+    { messageCount: messages.length, projectId, restartFrom: restartFrom ?? "beginning" },
+    context.traceId
   );
 
-  // Build context envelope (once — shared across all agents)
-  const context: AgentContext = buildAgentContext(
-    projectId ?? "",
-    rawIdea ?? messages.find((m) => m.role === "user")?.content ?? "",
-    messages,
-    tid
-  );
+  // ── Seed context from previous result when doing partial re-run ────────────
+  if (previousResult && restartFrom) {
+    const stageOrder: AgentName[] = [
+      "requirement_analyst",
+      "product_strategist",
+      "technical_architect",
+      "prompt_engineer",
+    ];
+    const restartIdx = stageOrder.indexOf(restartFrom);
 
-  // PHASE 3: For partial re-runs, restore previous agent outputs into context
-  if (options.existingContext) {
-    if (options.existingContext.requirementOutput) {
-      context.requirementOutput = options.existingContext.requirementOutput;
-    }
-    if (options.existingContext.strategyOutput) {
-      context.strategyOutput = options.existingContext.strategyOutput;
-    }
-    if (options.existingContext.architectureOutput) {
-      context.architectureOutput = options.existingContext.architectureOutput;
+    // Copy outputs from agents BEFORE the restart point
+    if (restartIdx > 0 && previousResult.requirements) context.requirementOutput = previousResult.requirements;
+    if (restartIdx > 1 && previousResult.strategy) context.strategyOutput = previousResult.strategy;
+    if (restartIdx > 2 && previousResult.architecture) context.architectureOutput = previousResult.architecture;
+
+    // Inject feedback context into the conversation text
+    if (injectedContext) {
+      context.conversationText += `\n\n[User feedback for re-run]: ${injectedContext}`;
     }
   }
 
-  // PHASE 3: Inject feedback context into conversation text if provided
-  if (options.injectedContext) {
-    context.conversationText = `${context.conversationText}\n\n[Feedback context]: ${options.injectedContext}`;
-  }
-
-  const restartFrom = options.restartFrom ?? "requirement_analyst";
-  const agentOrder: AgentName[] = [
-    "requirement_analyst",
-    "product_strategist",
-    "technical_architect",
-    "prompt_engineer",
-  ];
-  const startIndex = agentOrder.indexOf(restartFrom);
-  const effectiveStart = startIndex === -1 ? 0 : startIndex;
-
-  let sequenceNumber = effectiveStart;
-
-  // ── Stage 1: Requirement Analyst ─────────────────────────────────────────
-  if (effectiveStart <= 0) {
-    await runRequirementAnalyst(context);
-    await persistAgentOutput(
-      projectId, context, "requirement_analyst",
-      context.requirementOutput, sequenceNumber++
-    );
+  // ── Stage 1: Requirement Analyst ──────────────────────────────────────────
+  let requirements: RequirementAnalysis;
+  if (previousResult?.requirements && restartFrom && ["product_strategist", "technical_architect", "prompt_engineer"].includes(restartFrom)) {
+    requirements = previousResult.requirements;
+    context.requirementOutput = requirements;
+  } else {
+    const t = Date.now();
+    requirements = await runRequirementAnalyst(context);
+    persistAgentMessage(context, "requirement_analyst", requirements as unknown as Record<string, unknown>, 1,
+      { durationMs: Date.now() - t, usedFallback: context.usedFallback["requirement_analyst"] ?? false, confidence: context.confidenceScores["requirement_analyst"] });
   }
 
   // ── Stage 2: Product Strategist ───────────────────────────────────────────
-  if (effectiveStart <= 1) {
-    await runProductStrategist(context);
-    await persistAgentOutput(
-      projectId, context, "product_strategist",
-      context.strategyOutput, sequenceNumber++
-    );
+  let strategy: ProductStrategy;
+  if (previousResult?.strategy && restartFrom && ["technical_architect", "prompt_engineer"].includes(restartFrom)) {
+    strategy = previousResult.strategy;
+    context.strategyOutput = strategy;
+  } else {
+    const t = Date.now();
+    strategy = await runProductStrategist(context);
+    persistAgentMessage(context, "product_strategist", strategy as unknown as Record<string, unknown>, 2,
+      { durationMs: Date.now() - t, usedFallback: context.usedFallback["product_strategist"] ?? false, confidence: context.confidenceScores["product_strategist"] });
   }
 
   // ── Stage 3: Technical Architect ──────────────────────────────────────────
-  if (effectiveStart <= 2) {
-    await runTechnicalArchitect(context);
-    await persistAgentOutput(
-      projectId, context, "technical_architect",
-      context.architectureOutput, sequenceNumber++
-    );
+  let architecture: TechnicalArchitecture;
+  if (previousResult?.architecture && restartFrom === "prompt_engineer") {
+    architecture = previousResult.architecture;
+    context.architectureOutput = architecture;
+  } else {
+    const t = Date.now();
+    architecture = await runTechnicalArchitect(context);
+    persistAgentMessage(context, "technical_architect", architecture as unknown as Record<string, unknown>, 3,
+      { durationMs: Date.now() - t, usedFallback: context.usedFallback["technical_architect"] ?? false, confidence: context.confidenceScores["technical_architect"] });
   }
 
   // ── Stage 4: Prompt Engineer ──────────────────────────────────────────────
-  await runPromptEngineer(context);
-  await persistAgentOutput(
-    projectId, context, "prompt_engineer",
-    context.finalPromptOutput, sequenceNumber++
-  );
+  const t4 = Date.now();
+  const finalPrompt = await runPromptEngineer(context);
+  persistAgentMessage(context, "prompt_engineer", finalPrompt as unknown as Record<string, unknown>, 4,
+    { durationMs: Date.now() - t4, usedFallback: context.usedFallback["prompt_engineer"] ?? false, confidence: context.confidenceScores["prompt_engineer"] });
 
-  const totalDuration = Date.now() - pipelineStart;
+  const totalMs = Date.now() - pipelineStart;
   logger.info(
     "Pipeline completed",
-    {
-      totalMs: totalDuration,
-      warnings: context.warnings.length,
-      confidenceScores: context.confidenceScores,
-    },
-    tid
+    { totalMs, warnings: context.warnings.length, confidenceScores: context.confidenceScores },
+    context.traceId
   );
 
   return {
-    requirements: context.requirementOutput!,
-    strategy: context.strategyOutput!,
-    architecture: context.architectureOutput!,
-    finalPrompt: context.finalPromptOutput!,
-    traceId: tid,
+    requirements,
+    strategy,
+    architecture,
+    finalPrompt,
+    traceId: context.traceId,
     pipelineRunId: context.pipelineRunId,
     confidenceScores: context.confidenceScores,
     warnings: context.warnings,
-    isPartialRerun: effectiveStart > 0,
-    restartedFrom: effectiveStart > 0 ? restartFrom : undefined,
+    usedFallback: context.usedFallback,
   };
+}
+
+// ── Partial Pipeline (with feedback) ─────────────────────────────────────────
+
+export async function runPipelineWithFeedback(
+  messages: ChatMessage[],
+  projectId: string,
+  feedback: string,
+  previousResult: PipelineResult,
+  traceId?: string
+): Promise<PipelineResult> {
+  const tid = traceId ?? generateTraceId();
+
+  // Build a brief summary of the current result for the feedback integrator
+  const briefSummary = [
+    `Product: ${previousResult.finalPrompt.product_name}`,
+    `Problem: ${previousResult.requirements.problem_statement}`,
+    `Top features: ${previousResult.finalPrompt.features.slice(0, 3).join(", ")}`,
+    `Stack: ${Object.values(previousResult.architecture.suggested_stack).join(", ")}`,
+  ].join("\n");
+
+  const { restartFrom, injectedContext } = await runFeedbackIntegrator(feedback, briefSummary, tid);
+
+  return runFullPipeline(messages, projectId, tid, { restartFrom, injectedContext, previousResult });
 }

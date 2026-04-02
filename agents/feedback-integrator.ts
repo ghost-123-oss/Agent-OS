@@ -1,108 +1,84 @@
+'TYPESCRIPT'
 // =============================================================================
-// Agent OS — Feedback Integrator Agent (Phase 3)
+// Agent OS — Feedback Integrator Agent
 // =============================================================================
-// Receives user feedback on a generated brief and decides the minimal
-// re-run point: which agent should restart with the feedback injected.
-//
-// This enables partial pipeline re-runs:
-//   "Change the stack to use Firebase" → restart from technical_architect only
-//   "Focus on enterprise users instead" → restart from product_strategist
-//   "Fix the wording" → restart from prompt_engineer only
-//
-// Routed to: Groq (fast decision-making, same as technical_architect)
+// Reads user feedback on the final brief, determines which agent to restart
+// from, and prepares injected context for the partial re-run.
+// Powered by Groq (fast, low-latency routing decision).
 
 import { getProviderForAgent } from "@/lib/llm/provider";
 import type { LLMMessage } from "@/lib/llm/index";
-import { AGENT_PROMPTS } from "./prompts";
+import type { AgentName } from "@/types";
 import { logger } from "@/lib/logger";
-import type { AgentContext, AgentName } from "@/types";
 
-export interface FeedbackAnalysis {
-    analysisOfFeedback: string;
+export interface FeedbackIntegratorResult {
     restartFrom: AgentName;
+    reason: string;
     injectedContext: string;
     confidence: number;
-    warnings: string[];
 }
 
-// ── Fallback ─────────────────────────────────────────────────────────────────
-
-const FALLBACK_ANALYSIS: FeedbackAnalysis = {
-    analysisOfFeedback: "Could not analyse feedback — restarting from the beginning.",
-    restartFrom: "requirement_analyst",
-    injectedContext: "",
-    confidence: 0,
-    warnings: ["Feedback integrator failed — full re-run triggered"],
-};
-
-// ── Main function ─────────────────────────────────────────────────────────────
+const FEEDBACK_SYSTEM_PROMPT = `You are the Feedback Integrator — a routing specialist for Agent OS.
+ 
+CHARACTER:
+  Traits: fast, precise, analytical, decisive.
+  Temperature: 0.2 (low — routing decisions should be deterministic).
+  Forbidden: Never give vague answers. Always pick a specific agent to restart from.
+ 
+TASK:
+A user has reviewed their product brief and provided feedback.
+Determine which pipeline stage to restart from to incorporate the feedback efficiently.
+ 
+Routing rules:
+  - "requirement_analyst" — feedback changes the core problem, goals, or constraints
+  - "product_strategist"  — feedback changes users, features, or MVP scope
+  - "technical_architect" — feedback changes the tech stack or data model only
+  - "prompt_engineer"     — feedback is cosmetic (wording, tone, formatting only)
+ 
+You MUST respond with valid JSON:
+{
+  "restartFrom": "requirement_analyst" | "product_strategist" | "technical_architect" | "prompt_engineer",
+  "reason": "One sentence explaining the routing decision",
+  "injectedContext": "The key information from the feedback to inject into the restarted agent's prompt",
+  "confidence": 90,
+  "warnings": []
+}`;
 
 export async function runFeedbackIntegrator(
-    context: AgentContext,
-    userFeedback: string
-): Promise<FeedbackAnalysis> {
-    const agentName: AgentName = "feedback_integrator";
-    const provider = getProviderForAgent(agentName); // routes to Groq
-
-    logger.info(
-        "Feedback Integrator starting",
-        { feedbackLength: userFeedback.length },
-        context.traceId
-    );
-
-    const start = Date.now();
-
-    const existingOutputsSummary = [
-        context.requirementOutput
-            ? `Requirements: ${JSON.stringify(context.requirementOutput)}`
-            : "",
-        context.strategyOutput
-            ? `Strategy: ${JSON.stringify(context.strategyOutput)}`
-            : "",
-        context.architectureOutput
-            ? `Architecture: ${JSON.stringify(context.architectureOutput)}`
-            : "",
-        context.finalPromptOutput
-            ? `Final prompt product name: ${context.finalPromptOutput.product_name}`
-            : "",
-    ]
-        .filter(Boolean)
-        .join("\n\n");
-
-    const messages: LLMMessage[] = [
-        { role: "system", content: AGENT_PROMPTS.feedback_integrator },
-        {
-            role: "user",
-            content: `The user provided the following feedback on the generated project brief:\n\n"${userFeedback}"\n\nCurrent pipeline outputs for context:\n\n${existingOutputsSummary}\n\nAnalyse the feedback and decide which agent to restart from.`,
-        },
-    ];
-
+    feedback: string,
+    currentBriefSummary: string,
+    traceId: string
+): Promise<FeedbackIntegratorResult> {
     try {
-        const raw = await provider.chatJSON<FeedbackAnalysis>(messages);
+        const provider = await getProviderForAgent("feedback_integrator");
 
-        const durationMs = Date.now() - start;
-        logger.info(
-            "Feedback Integrator completed",
+        const messages: LLMMessage[] = [
+            { role: "system", content: FEEDBACK_SYSTEM_PROMPT },
             {
-                restartFrom: raw.restartFrom,
-                confidence: raw.confidence,
-                durationMs,
+                role: "user",
+                content: `Current brief summary:\n${currentBriefSummary}\n\nUser feedback:\n${feedback}\n\nWhich agent should restart?`,
             },
-            context.traceId
-        );
+        ];
 
-        context.confidenceScores[agentName] = raw.confidence ?? 0;
-        context.durationMs[agentName] = durationMs;
+        const result = await provider.chatJSON<FeedbackIntegratorResult>(messages);
 
-        return raw;
+        logger.info("FeedbackIntegrator: routing decision", {
+            restartFrom: result.restartFrom,
+            confidence: result.confidence,
+        }, traceId);
+
+        return result;
     } catch (err) {
-        const durationMs = Date.now() - start;
-        logger.error(
-            "Feedback Integrator failed — defaulting to full re-run",
-            { error: err instanceof Error ? err.message : String(err), durationMs },
-            context.traceId
-        );
-        context.warnings.push("Feedback integrator failed — full re-run triggered");
-        return FALLBACK_ANALYSIS;
+        logger.error("FeedbackIntegrator failed — defaulting to product_strategist", {
+            error: err instanceof Error ? err.message : String(err),
+        }, traceId);
+
+        // Safe default: restart from product_strategist (catches most feedback types)
+        return {
+            restartFrom: "product_strategist",
+            reason: "Feedback integrator failed — defaulting to product strategy re-run.",
+            injectedContext: feedback,
+            confidence: 50,
+        };
     }
 }
