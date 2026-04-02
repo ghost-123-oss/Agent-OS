@@ -4,7 +4,7 @@
 // =============================================================================
 
 import type { LLMMessage, LLMProvider, LLMResponse } from "./index";
-import { extractAndParseJSON } from "../utils";
+import { extractAndParseJSON } from "@/lib/utils";
 import { withRetry } from "./retry";
 import { checkCircuit, recordSuccess, recordFailure } from "./circuit-breaker";
 

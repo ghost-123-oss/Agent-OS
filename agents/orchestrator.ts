@@ -122,9 +122,20 @@ export function isPipelineReady(content: string): boolean {
 
 // ── Fire-and-forget message persistence ──────────────────────────────────────
 
+function getNextAgent(current: AgentName): AgentName {
+  const chain: AgentName[] = [
+    "requirement_analyst",
+    "product_strategist",
+    "technical_architect",
+    "prompt_engineer"
+  ];
+  const idx = chain.indexOf(current);
+  return chain[Math.min(idx + 1, chain.length - 1)];
+}
+
 function persistAgentMessage(
   context: AgentContext,
-  agentName: string,
+  agentName: AgentName,
   payload: Record<string, unknown>,
   sequenceNumber: number,
   meta: { durationMs: number; usedFallback: boolean; confidence?: number; modelUsed?: string }
@@ -132,8 +143,8 @@ function persistAgentMessage(
   saveAgentMessageAction({
     project_id: context.projectId,
     pipeline_run_id: context.pipelineRunId,
-    from_agent: agentName as never,
-    to_agent: "prompt_engineer" as never,
+    from_agent: agentName,
+    to_agent: getNextAgent(agentName),
     message_type: "output",
     payload,
     sequence_number: sequenceNumber,
@@ -147,6 +158,7 @@ function persistAgentMessage(
     logger.error("persistAgentMessage failed (fire-and-forget)", { error: err })
   );
 }
+
 
 // ── Full Pipeline ─────────────────────────────────────────────────────────────
 

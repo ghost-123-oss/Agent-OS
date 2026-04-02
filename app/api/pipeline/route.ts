@@ -5,6 +5,9 @@
 // POST /api/pipeline — Run the full or partial multi-agent pipeline
 
 import { NextRequest, NextResponse } from "next/server";
+export const maxDuration = 60;
+export const dynamic = 'force-dynamic';
+
 import { runFullPipeline, runPipelineWithFeedback } from "@/agents/orchestrator";
 import type { PipelineResult } from "@/agents/orchestrator";
 import { logger, generateTraceId } from "@/lib/logger";

@@ -19,10 +19,23 @@ import {
 import dynamic from "next/dynamic";
 
 // Premium Dynamic Components
-const AgentOSTitle = dynamic(() => import("@/components/AgentOSTitle"), { ssr: false });
-const AgentOSOrb = dynamic(() => import("@/components/AgentOSOrb"), { ssr: false });
-const AgentOSWorkspaceMock = dynamic(() => import("@/components/AgentOSWorkspaceMock"), { ssr: false });
-const MultiAgentFlow = dynamic(() => import("@/components/MultiAgentFlow"), { ssr: false });
+const AgentOSTitle = dynamic(() => import("@/components/AgentOSTitle"), { 
+  ssr: false,
+  loading: () => <div className="h-20 w-80 bg-muted/20 animate-pulse rounded-lg mx-auto" />
+});
+const AgentOSOrb = dynamic(() => import("@/components/AgentOSOrb"), { 
+  ssr: false,
+  loading: () => <div className="size-64 rounded-full bg-muted/10 animate-pulse mx-auto" />
+});
+const AgentOSWorkspaceMock = dynamic(() => import("@/components/AgentOSWorkspaceMock"), { 
+  ssr: false,
+  loading: () => <div className="w-full h-full bg-muted/5 animate-pulse" />
+});
+const MultiAgentFlow = dynamic(() => import("@/components/MultiAgentFlow"), { 
+  ssr: false,
+  loading: () => <div className="w-full h-full bg-muted/5 animate-pulse" />
+});
+
 
 // Refined Local Components
 import ThemeToggle from "@/components/ThemeToggle";

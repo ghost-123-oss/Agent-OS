@@ -143,7 +143,9 @@ export function useWorkspace(
       dispatch({ type: "SET_LOADING", payload: { chat: true } });
 
       if (activeProjectId) {
-        await persistMessage(activeProjectId, userMsg);
+        // Fire-and-forget to avoid blocking the chat loop
+        persistMessage(activeProjectId, userMsg)
+          .catch((err) => console.error("[useWorkspace] persistMessage failed:", err));
       }
 
       try {
@@ -164,7 +166,9 @@ export function useWorkspace(
         dispatch({ type: "SET_MESSAGES", payload: updatedMsgs });
 
         if (activeProjectId) {
-          await persistMessage(activeProjectId, aiMsg);
+          // Fire-and-forget to avoid blocking the chat loop
+          persistMessage(activeProjectId, aiMsg)
+            .catch((err) => console.error("[useWorkspace] persistAI AI message failed:", err));
         }
 
         if (shouldTriggerPipeline(aiContent)) {
@@ -219,7 +223,7 @@ export function useWorkspace(
       type: "INIT_PROJECT",
       payload: { projectId: newId, rawIdea: state.rawIdea, hasMessages: true, messages: [] },
     });
-    router.replace(`/?id=${newId}`, { scroll: false });
+    router.replace(`/workspace?id=${newId}`, { scroll: false });
     await updateProjectStatus(newId, "gathering");
     sendMessage(state.rawIdea, [], newId);
     return project;

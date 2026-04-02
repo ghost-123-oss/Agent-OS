@@ -4,6 +4,9 @@
 // POST /api/chat — Send a message, get orchestrator response
 
 import { NextRequest, NextResponse } from "next/server";
+export const maxDuration = 30;
+export const dynamic = 'force-dynamic';
+
 import { getOrchestratorResponse } from "@/agents/orchestrator";
 import { logger, generateTraceId } from "@/lib/logger";
 import type { ChatMessage } from "@/types";

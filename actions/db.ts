@@ -4,7 +4,7 @@
 // Agent OS — Supabase Database Server Actions
 // =============================================================================
 
-import { createClient } from "@supabase/supabase-js";
+import { getSupabaseServer } from "@/lib/supabase/server";
 import { logger } from "@/lib/logger";
 import type {
   Project,
@@ -18,10 +18,8 @@ import type {
   ProjectStatus,
 } from "@/types";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+const supabase = getSupabaseServer();
+
 
 // Agent output type union — replaces `any`
 export type AgentOutputJson =
@@ -242,7 +240,9 @@ export async function getProjectsAction(): Promise<Project[]> {
   const { data, error } = await supabase
     .from("projects")
     .select("*")
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .limit(20);
+
 
   if (error) {
     logger.error("getProjectsAction failed", {

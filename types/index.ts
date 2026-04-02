@@ -77,6 +77,8 @@ export interface RequirementAnalysis {
   goals: string[];
   constraints: string[];
   missing_details: string[];
+  confidence?: number;
+  warnings?: string[];
 }
 
 export interface ProductStrategy {
@@ -87,6 +89,8 @@ export interface ProductStrategy {
     priority: "must" | "should" | "nice";
   }[];
   user_flow: string[];
+  confidence?: number;
+  warnings?: string[];
 }
 
 export interface TechnicalArchitecture {
@@ -94,6 +98,8 @@ export interface TechnicalArchitecture {
   system_modules: string[];
   integrations: string[];
   data_model_overview: string[];
+  confidence?: number;
+  warnings?: string[];
 }
 
 export interface FinalPromptData {
@@ -110,6 +116,8 @@ export interface FinalPromptData {
   constraints: string[];
   future_enhancements: string[];
   build_instruction: string;
+  confidence?: number;
+  warnings?: string[];
 }
 
 // ── Phase 1: AgentContext — the typed pipeline envelope ──────────────────────

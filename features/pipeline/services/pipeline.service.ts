@@ -36,11 +36,13 @@ export async function runPipelineRequest(
   const { feedback, previousResult, animateFrom = 0 } = options;
 
   try {
-    // Animate only the agents that will actually run
-    for (let i = animateFrom; i < 4; i++) {
-      onStatusUpdate(i, "running");
-      await new Promise((r) => setTimeout(r, 800));
-    }
+    // Run animation concurrently with the real API call to reduce perceived wait time
+    const animateAgents = async () => {
+      for (let i = animateFrom; i < 4; i++) {
+        onStatusUpdate(i, "running");
+        await new Promise((r) => setTimeout(r, 800));
+      }
+    };
 
     const body: Record<string, unknown> = { messages, projectId };
     if (options.rawIdea) body.rawIdea = options.rawIdea;
@@ -51,11 +53,16 @@ export async function runPipelineRequest(
       body.previousResult = previousResult;
     }
 
-    const res = await fetch("/api/pipeline", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    // Fire both simultaneously — don't await animation before fetch
+    const [res] = await Promise.all([
+      fetch("/api/pipeline", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+      animateAgents()
+    ]);
+
 
     if (!res.ok) {
       const traceId = res.headers.get("x-trace-id");
