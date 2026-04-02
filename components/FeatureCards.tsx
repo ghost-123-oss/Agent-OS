@@ -46,7 +46,7 @@ export default function FeatureCards() {
           <p className="text-muted-foreground text-sm leading-relaxed">
             {feature.description}
           </p>
-          <div className="absolute top-0 right-0 p-4 opacity-[0.02] group-hover:opacity-[0.05] transition-opacity">
+          <div className="absolute top-0 right-0 p-4 opacity-[0.03] dark:opacity-[0.02] group-hover:opacity-[0.08] dark:group-hover:opacity-[0.05] transition-opacity">
             <feature.icon className="size-24" />
           </div>
         </motion.div>

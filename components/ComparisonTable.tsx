@@ -46,7 +46,7 @@ export default function ComparisonTable() {
            whileInView={{ opacity: 1, x: 0 }}
            viewport={{ once: true }}
            transition={{ delay: i * 0.1, duration: 0.5 }}
-           className="grid grid-cols-3 p-6 border-b border-white/[0.03] last:border-0 hover:bg-white/[0.01] transition-colors"
+           className="grid grid-cols-3 p-6 border-b border-border/50 last:border-0 hover:bg-muted/5 transition-colors"
         >
           <div className="text-sm font-semibold">{cat.label}</div>
           <div className="text-xs text-muted-foreground pr-4 flex items-center gap-2">

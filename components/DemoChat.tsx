@@ -186,14 +186,14 @@ export default function DemoChat() {
   ];
 
   return (
-    <div className="flex-1 bg-[#0a0a0a] flex flex-col relative h-full font-sans">
+    <div className="flex-1 dark:bg-[#0a0a0a] bg-white dark:text-white text-zinc-900 flex flex-col relative h-full font-sans">
       {/* Play/Reset Button Overlay */}
       {!isPlaying && (
-         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-[2px]">
-            <button 
-              onClick={handlePlay}
-              className="px-8 py-3 bg-[#1f1f1f] border border-[#333] hover:border-[#00f0ff]/50 rounded-full text-white font-medium tracking-wide transition-all flex items-center gap-2 shadow-xl"
-            >
+          <div className="absolute inset-0 z-50 flex items-center justify-center dark:bg-black/60 bg-white/60 backdrop-blur-[2px]">
+             <button 
+               onClick={handlePlay}
+               className="px-8 py-3 dark:bg-[#1f1f1f] bg-zinc-200 dark:border border-[#333] border-zinc-300 hover:dark:border-[#00f0ff]/50 hover:border-[#00C4D4] rounded-full dark:text-white text-zinc-900 font-medium tracking-wide transition-all flex items-center gap-2 shadow-xl"
+             >
               <div className="w-0 h-0 border-t-[6px] border-t-transparent border-l-[10px] border-l-[#00f0ff] border-b-[6px] border-b-transparent ml-1" />
               Watch Demo
             </button>
@@ -203,10 +203,10 @@ export default function DemoChat() {
       {/* Header Replay Link */}
       {isPlaying && (
          <button 
-           onClick={handlePlay}
-           className="absolute top-4 right-6 z-50 text-[11px] text-slate-500 uppercase tracking-widest hover:text-[#00f0ff] transition-colors"
-         >
-           [ Replay ]
+            onClick={handlePlay}
+            className="absolute top-4 right-6 z-50 text-[11px] dark:text-slate-500 text-zinc-500 uppercase tracking-widest hover:text-[#00f0ff] dark:hover:text-[#00f0ff] hover:text-[#00C4D4] transition-colors"
+          >
+            [ Replay ]
          </button>
       )}
 
@@ -219,9 +219,9 @@ export default function DemoChat() {
             transition={{ duration: 0.3 }}
             className="flex gap-4 justify-end"
           >
-            <div className="max-w-[85%] px-6 py-4 bg-[#1f1f1f] text-white rounded-[18px] rounded-tr-[4px] text-[15px] leading-[1.6] shadow-sm">
+            <div className="max-w-[85%] px-6 py-4 dark:bg-[#1f1f1f] bg-zinc-200 dark:text-white text-zinc-900 rounded-[18px] rounded-tr-[4px] text-[15px] leading-[1.6] shadow-sm">
                {userText}
-               {!userFinished && <span className="inline-block w-1.5 h-4 bg-[#00f0ff] ml-1 align-middle animate-pulse" />}
+               {!userFinished && <span className="inline-block w-1.5 h-4 ml-1 align-middle animate-pulse bg-[#00f0ff]" />}
             </div>
           </motion.div>
         )}
@@ -234,8 +234,8 @@ export default function DemoChat() {
              transition={{ duration: 0.2 }}
              className="flex flex-col gap-2"
            >
-             <span className="text-[11px] text-slate-500 font-medium uppercase tracking-[0.2em] ml-12">AgentOS</span>
-             <div className="flex items-center gap-4 ml-12 px-6 py-4 bg-[#18181b] border-l-2 border-[#00f0ff] rounded-[4px] rounded-r-[18px] rounded-bl-[18px] w-fit">
+              <span className="text-[11px] dark:text-slate-500 text-zinc-500 font-medium uppercase tracking-[0.2em] ml-12">AgentOS</span>
+              <div className="flex items-center gap-4 ml-12 px-6 py-4 dark:bg-[#18181b] bg-zinc-100 border-l-2 dark:border-[#00f0ff] border-[#00C4D4] rounded-[4px] rounded-r-[18px] rounded-bl-[18px] w-fit">
                <div className="flex gap-1.5">
                  <div className="w-1.5 h-1.5 rounded-full bg-[#00f0ff] animate-pulse [animation-delay:0ms]" />
                  <div className="w-1.5 h-1.5 rounded-full bg-[#00f0ff] animate-pulse [animation-delay:200ms]" />
@@ -253,10 +253,10 @@ export default function DemoChat() {
             transition={{ duration: 0.3 }}
             className="flex flex-col gap-2"
           >
-            <span className="text-[11px] text-slate-500 font-medium uppercase tracking-[0.2em] ml-12">AgentOS</span>
+            <span className="text-[11px] dark:text-slate-500 text-zinc-500 font-medium uppercase tracking-[0.2em] ml-12">AgentOS</span>
             <div className="flex gap-4 items-start">
-              <div className="w-8 h-8 rounded-full bg-[#18181b] border border-[#333] flex items-center justify-center text-[10px] text-slate-400 font-bold shrink-0 mt-1">OS</div>
-              <div className="flex-1 max-w-[90%] bg-[#18181b] border-l-2 border-[#00f0ff] px-6 py-5 rounded-[4px] rounded-r-[18px] rounded-bl-[18px] text-[15px] leading-[1.6] text-slate-200 relative">
+              <div className="w-8 h-8 rounded-full dark:bg-[#18181b] bg-zinc-200 dark:border border-[#333] border-zinc-300 dark:text-slate-400 text-zinc-600 flex items-center justify-center text-[10px] font-bold shrink-0 mt-1">OS</div>
+              <div className="flex-1 max-w-[90%] dark:bg-[#18181b] bg-white dark:border-l-2 border-l-2 dark:border-[#00f0ff] border-[#00C4D4] dark:text-slate-200 text-zinc-800 px-6 py-5 rounded-[4px] rounded-r-[18px] rounded-bl-[18px] text-[15px] leading-[1.6] relative">
                 
                 <div className="space-y-4">
                     {responseLines.map((line, idx) => (
@@ -270,9 +270,9 @@ export default function DemoChat() {
                         className="flex items-start gap-3"
                       >
                         {idx > 0 && idx < 5 && (
-                           <div className={`mt-2.5 size-1.5 rounded-full transition-all duration-500 ${agentStep > idx-1 ? 'bg-[#00f0ff]' : 'bg-slate-800'}`} />
+                           <div className={`mt-2.5 size-1.5 rounded-full transition-all duration-500 ${agentStep > idx-1 ? 'bg-[#00f0ff]' : 'dark:bg-slate-800 bg-zinc-300'}`} />
                         )}
-                        <span className={idx === 0 ? "font-semibold text-white" : ""}>{line}</span>
+                        <span className={idx === 0 ? "font-semibold dark:text-white text-zinc-900" : ""}>{line}</span>
                       </motion.div>
                     ))}
                 </div>
@@ -284,7 +284,7 @@ export default function DemoChat() {
                       initial={{ opacity: 0, scale: 0.98 }}
                       animate={{ opacity: 1, scale: 1 }}
                       transition={{ delay: 0.8, duration: 0.4 }}
-                      className="mt-6 border border-[#222] rounded-xl overflow-hidden"
+                      className="mt-6 border dark:border-[#222] border-zinc-200 rounded-xl overflow-hidden"
                     >
                       <DemoAgentGraph activeStep={agentStep} />
                     </motion.div>
@@ -297,9 +297,9 @@ export default function DemoChat() {
       </div>
 
       {/* Input Overlay */}
-      <div className="p-6 border-t border-[#1f1f1f]">
-         <div className="h-12 border border-[#1f1f1f] rounded-full flex items-center px-6 bg-[#0a0a0a] shadow-inner">
-            <span className="text-[15px] text-slate-500">Type your idea here...</span>
+      <div className="p-6 border-t dark:border-[#1f1f1f] border-zinc-200">
+         <div className="h-12 border dark:border-[#1f1f1f] border-zinc-300 rounded-full flex items-center px-6 dark:bg-[#0a0a0a] bg-zinc-100 shadow-inner">
+            <span className="text-[15px] dark:text-slate-500 text-zinc-500">Type your idea here...</span>
          </div>
       </div>
     </div>
