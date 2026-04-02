@@ -20,11 +20,11 @@ export interface LLMProvider {
 
 /**
  * Returns true if the app should operate in mock mode.
- * Uses server-only env var (no NEXT_PUBLIC_ prefix) to avoid leaking
- * this flag into the client bundle.
+ * Checks both server-only and client-side env vars for flexibility.
  */
 export function isMockMode(): boolean {
-  if (process.env.FORCE_MOCK_MODE === "true") return true;
+  // Check both variants (with and without NEXT_PUBLIC_ prefix)
+  if (process.env.FORCE_MOCK_MODE === "true" || process.env.NEXT_PUBLIC_FORCE_MOCK_MODE === "true") return true;
   if (!process.env.MISTRAL_API_KEY) return true;
   return false;
 }

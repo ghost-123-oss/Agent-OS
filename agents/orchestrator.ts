@@ -59,25 +59,52 @@ export async function getOrchestratorResponse(
   traceId?: string
 ): Promise<string> {
   const tid = traceId ?? generateTraceId();
-  const provider = getLLMProvider();
+  const startTime = Date.now();
+  
+  logger.info("Orchestrator: Starting chat processing", { 
+    messageCount: conversationHistory.length 
+  }, tid);
 
-  logger.info("Orchestrator chat", { count: conversationHistory.length }, tid);
+  try {
+    const provider = getLLMProvider();
+    logger.info("Orchestrator: Provider obtained", { 
+      provider: provider.constructor.name 
+    }, tid);
 
-  const messages: LLMMessage[] = [
-    { role: "system", content: AGENT_PROMPTS.orchestrator },
-    ...conversationHistory.map((msg) => ({
-      role: msg.role as "user" | "assistant",
-      content: msg.content,
-    })),
-  ];
+    const messages: LLMMessage[] = [
+      { role: "system", content: AGENT_PROMPTS.orchestrator },
+      ...conversationHistory.map((msg) => ({
+        role: msg.role as "user" | "assistant",
+        content: msg.content,
+      })),
+    ];
 
-  const response = await provider.chat(messages);
+    logger.info("Orchestrator: Calling LLM provider", { 
+      messageCount: messages.length 
+    }, tid);
 
-  // Phase 3: structured trigger detection
-  // The orchestrator prompt ends with the EXACT phrase that triggers the pipeline.
-  // This is more reliable than substring matching.
-  logger.info("Orchestrator response received", { provider: response.provider }, tid);
-  return response.content;
+    const response = await provider.chat(messages);
+    const duration = Date.now() - startTime;
+
+    logger.info("Orchestrator: Response received successfully", { 
+      provider: response.provider,
+      contentLength: response.content.length,
+      duration 
+    }, tid);
+
+    return response.content;
+  } catch (error) {
+    const duration = Date.now() - startTime;
+    logger.error("Orchestrator: Error during chat processing", {
+      error: error instanceof Error ? {
+        message: error.message,
+        stack: error.stack,
+        name: error.name
+      } : String(error),
+      duration
+    }, tid);
+    throw error;
+  }
 }
 
 // ── Trigger detection (Phase 3 improvement) ───────────────────────────────────

@@ -127,6 +127,7 @@ export function useWorkspace(
       currentProjectId?: string | null
     ) => {
       const activeProjectId = currentProjectId ?? state.projectId;
+      const startTime = Date.now();
 
       const userMsg: ChatMessage = {
         id: crypto.randomUUID(),
@@ -146,7 +147,10 @@ export function useWorkspace(
       }
 
       try {
+        console.log("[useWorkspace] Sending chat message to API...");
         const { content: aiContent } = await sendChatMessage(allMsgs);
+        const duration = Date.now() - startTime;
+        console.log(`[useWorkspace] Chat response received in ${duration}ms`);
 
         const aiMsg: ChatMessage = {
           id: crypto.randomUUID(),
@@ -164,19 +168,24 @@ export function useWorkspace(
         }
 
         if (shouldTriggerPipeline(aiContent)) {
+          console.log("[useWorkspace] Pipeline trigger detected");
           setTimeout(() => runPipeline(updatedMsgs, activeProjectId), 1500);
         }
       } catch (err) {
+        const duration = Date.now() - startTime;
+        console.error(`[useWorkspace] Chat failed after ${duration}ms:`, err);
         const message =
           err instanceof Error ? err.message : "Failed to reach the AI.";
         dispatchError(message);
+        
+        // Add error message to chat so user sees feedback
         dispatch({
           type: "ADD_MESSAGE",
           payload: {
             id: crypto.randomUUID(),
             role: "assistant",
             sender_type: "orchestrator",
-            content: "Something went wrong. Please try again.",
+            content: `⚠️ Error: ${message}\n\nPlease check your connection and try again. If the problem persists, verify that API keys are configured in your production environment.`,
             timestamp: new Date(),
           },
         });
